@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
-import { OrderService } from '../services/order-service';
+import { OrderService } from '../services/order-service/index';
 
 const isDev = process.env.NODE_ENV === 'development';
 let mainWindow: BrowserWindow | null = null;
