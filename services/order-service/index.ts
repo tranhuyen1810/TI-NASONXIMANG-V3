@@ -3,22 +3,78 @@ import Database from 'better-sqlite3';
 import { createServer, Server as HttpServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 
+type WorkflowStatus =
+  | 'NEW'
+  | 'DOCS_PREPARED'
+  | 'INBOUND_WEIGHED'
+  | 'WAREHOUSE_CONFIRMED'
+  | 'OUTBOUND_WEIGHED'
+  | 'SECURITY_REVIEW'
+  | 'MISMATCH'
+  | 'COMPLETED';
+
 type NewOrderPayload = {
   customerName: string;
   phone: string;
   productName: string;
   quantity: number;
+  deliveryTime?: string;
   note?: string;
 };
+
+type OrderUpdatePayload = Partial<{
+  delivery_note_number: string;
+  export_note_number: string;
+  driver_name: string;
+  truck_plate: string;
+  weigh_in_ticket: string;
+  weigh_in_weight: number;
+  warehouse_actual_quantity: number;
+  warehouse_note: string;
+  driver_received_docs_at: string;
+  left_factory_at: string;
+  weigh_out_ticket: string;
+  weigh_out_weight: number;
+  accounting_received_weigh_out_at: string;
+  security_note: string;
+  security_match: 0 | 1;
+  summary_exported_at: string;
+  status: WorkflowStatus;
+}>;
 
 type OrderRecord = {
   id: number;
   customer_name: string;
   phone: string;
   product_name: string;
-  quantity: number;
+  planned_quantity: number;
+  delivery_time: string;
   note: string;
+  delivery_note_number: string;
+  export_note_number: string;
+  driver_name: string;
+  truck_plate: string;
+  weigh_in_ticket: string;
+  weigh_in_weight: number | null;
+  weigh_in_at: string;
+  warehouse_actual_quantity: number | null;
+  warehouse_note: string;
+  warehouse_checked_at: string;
+  warehouse_released_at: string;
+  driver_received_docs_at: string;
+  left_factory_at: string;
+  weigh_out_ticket: string;
+  weigh_out_weight: number | null;
+  weigh_out_at: string;
+  accounting_received_weigh_out_at: string;
+  security_checked_at: string;
+  security_note: string;
+  security_match: 0 | 1 | null;
+  security_confirmed_at: string;
+  summary_exported_at: string;
+  status: WorkflowStatus;
   created_at: string;
+  updated_at: string;
 };
 
 export class OrderService {
@@ -67,14 +123,39 @@ export class OrderService {
 
   private prepareDatabase(): void {
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS orders (
+      CREATE TABLE IF NOT EXISTS order_workflows (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         customer_name TEXT NOT NULL,
         phone TEXT NOT NULL,
         product_name TEXT NOT NULL,
-        quantity REAL NOT NULL,
+        planned_quantity REAL NOT NULL,
+        delivery_time TEXT DEFAULT '',
         note TEXT DEFAULT '',
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        delivery_note_number TEXT DEFAULT '',
+        export_note_number TEXT DEFAULT '',
+        driver_name TEXT DEFAULT '',
+        truck_plate TEXT DEFAULT '',
+        weigh_in_ticket TEXT DEFAULT '',
+        weigh_in_weight REAL,
+        weigh_in_at TEXT DEFAULT '',
+        warehouse_actual_quantity REAL,
+        warehouse_note TEXT DEFAULT '',
+        warehouse_checked_at TEXT DEFAULT '',
+        warehouse_released_at TEXT DEFAULT '',
+        driver_received_docs_at TEXT DEFAULT '',
+        left_factory_at TEXT DEFAULT '',
+        weigh_out_ticket TEXT DEFAULT '',
+        weigh_out_weight REAL,
+        weigh_out_at TEXT DEFAULT '',
+        accounting_received_weigh_out_at TEXT DEFAULT '',
+        security_checked_at TEXT DEFAULT '',
+        security_note TEXT DEFAULT '',
+        security_match INTEGER,
+        security_confirmed_at TEXT DEFAULT '',
+        summary_exported_at TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'NEW',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
     `);
   }
@@ -86,7 +167,7 @@ export class OrderService {
 
     this.app.get('/api/orders', (_req, res) => {
       const rows = this.db
-        .prepare('SELECT * FROM orders ORDER BY id DESC')
+        .prepare('SELECT * FROM order_workflows ORDER BY id DESC')
         .all() as OrderRecord[];
 
       res.json(rows);
@@ -102,7 +183,15 @@ export class OrderService {
       }
 
       const insert = this.db.prepare(
-        'INSERT INTO orders (customer_name, phone, product_name, quantity, note) VALUES (?, ?, ?, ?, ?)'
+        `INSERT INTO order_workflows (
+          customer_name,
+          phone,
+          product_name,
+          planned_quantity,
+          delivery_time,
+          note,
+          status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`
       );
 
       const result = insert.run(
@@ -110,15 +199,57 @@ export class OrderService {
         payload.phone.trim(),
         payload.productName.trim(),
         payload.quantity,
-        payload.note?.trim() ?? ''
+        payload.deliveryTime?.trim() ?? '',
+        payload.note?.trim() ?? '',
+        'NEW'
       );
 
       const order = this.db
-        .prepare('SELECT * FROM orders WHERE id = ?')
+        .prepare('SELECT * FROM order_workflows WHERE id = ?')
         .get(result.lastInsertRowid) as OrderRecord;
 
       this.broadcast({ type: 'order:created', payload: order });
       res.status(201).json(order);
+    });
+
+    this.app.patch('/api/orders/:id', (req, res) => {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) {
+        res.status(400).json({ error: 'ID khong hop le.' });
+        return;
+      }
+
+      const payload = req.body as OrderUpdatePayload;
+      const validationError = this.validateUpdate(payload);
+      if (validationError) {
+        res.status(400).json({ error: validationError });
+        return;
+      }
+
+      const fields = Object.entries(payload).filter(([, value]) => value !== undefined);
+      if (!fields.length) {
+        res.status(400).json({ error: 'Khong co du lieu cap nhat.' });
+        return;
+      }
+
+      const setClause = fields.map(([key]) => `${key} = ?`).join(', ');
+      const values = fields.map(([, value]) => value);
+
+      this.db
+        .prepare(`UPDATE order_workflows SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(...values, id);
+
+      const order = this.db
+        .prepare('SELECT * FROM order_workflows WHERE id = ?')
+        .get(id) as OrderRecord | undefined;
+
+      if (!order) {
+        res.status(404).json({ error: 'Khong tim thay ho so.' });
+        return;
+      }
+
+      this.broadcast({ type: 'order:updated', payload: order });
+      res.json(order);
     });
   }
 
@@ -141,6 +272,31 @@ export class OrderService {
 
     if (!Number.isFinite(payload.quantity) || payload.quantity <= 0) {
       return 'So luong phai lon hon 0.';
+    }
+
+    return null;
+  }
+
+  private validateUpdate(payload: OrderUpdatePayload): string | null {
+    if (!payload || typeof payload !== 'object') {
+      return 'Payload khong hop le.';
+    }
+
+    const numericFields: Array<keyof OrderUpdatePayload> = [
+      'weigh_in_weight',
+      'weigh_out_weight',
+      'warehouse_actual_quantity'
+    ];
+
+    for (const field of numericFields) {
+      const value = payload[field];
+      if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+        return 'Gia tri khoi luong/so luong khong hop le.';
+      }
+    }
+
+    if (payload.security_match !== undefined && payload.security_match !== 0 && payload.security_match !== 1) {
+      return 'Gia tri doi chieu bao ve khong hop le.';
     }
 
     return null;
