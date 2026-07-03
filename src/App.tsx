@@ -1,11 +1,10 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   AlertLevel,
   CustomerStatus,
   OrderStatus,
   Role,
-  SalesOrder,
   calcActualWeight,
   useBusinessStore
 } from './store/business';
@@ -301,9 +300,7 @@ export default function App() {
     }
 
     return orders.filter((item) =>
-      [item.orderNo, item.product, item.spec, item.truckPlate, item.driverName].some((value) =>
-        value.toLowerCase().includes(text)
-      )
+      [item.orderNo, item.product, item.spec, item.truckPlate, item.driverName].some((value) => value.toLowerCase().includes(text))
     );
   }, [orders, orderFilter]);
 
@@ -351,7 +348,20 @@ export default function App() {
         flash('Vai tro hien tai khong co quyen sua khach hang.');
         return;
       }
-      updateCustomer(customerForm.id, { ...customerForm, id: undefined } as never, role.toLowerCase());
+      updateCustomer(
+        customerForm.id,
+        {
+          code: customerForm.code,
+          name: customerForm.name,
+          address: customerForm.address,
+          phone: customerForm.phone,
+          email: customerForm.email,
+          contactPerson: customerForm.contactPerson,
+          taxCode: customerForm.taxCode,
+          note: customerForm.note
+        },
+        role.toLowerCase()
+      );
       flash('Da cap nhat khach hang.');
     } else {
       if (!can('CUSTOMER_ADD')) {
@@ -614,7 +624,7 @@ export default function App() {
             <div>
               <p className="text-xs uppercase tracking-[0.3em] text-rose-700">TI Nason Xi Mang</p>
               <h1 className="text-2xl font-black text-slate-900 md:text-3xl">He thong quan ly xuat kho va can xe toan quy trinh</h1>
-              <p className="text-sm text-slate-600">Khach hang -> Don hang -> Phieu xuat -> Can vao -> Xuat kho -> Can ra -> Doi chieu -> Bao cao</p>
+              <p className="text-sm text-slate-600">Khach hang -&gt; Don hang -&gt; Phieu xuat -&gt; Can vao -&gt; Xuat kho -&gt; Can ra -&gt; Doi chieu -&gt; Bao cao</p>
             </div>
             <div className="flex items-center gap-2">
               <label className="text-xs font-semibold text-slate-600">Vai tro dang dang nhap</label>
@@ -751,7 +761,19 @@ export default function App() {
                             <div className="flex flex-wrap gap-1">
                               <button
                                 type="button"
-                                onClick={() => setCustomerForm({ ...item, id: item.id })}
+                                onClick={() =>
+                                  setCustomerForm({
+                                    id: item.id,
+                                    code: item.code,
+                                    name: item.name,
+                                    address: item.address,
+                                    phone: item.phone,
+                                    email: item.email,
+                                    contactPerson: item.contactPerson,
+                                    taxCode: item.taxCode,
+                                    note: item.note
+                                  })
+                                }
                                 className="rounded bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-700"
                               >
                                 Sua
@@ -1400,7 +1422,7 @@ export default function App() {
 
 type PanelProps = {
   title: string;
-  children: React.ReactNode;
+  children: ReactNode;
 };
 
 function Panel({ title, children }: PanelProps) {
@@ -1481,253 +1503,5 @@ function StatCard({ title, value, tone }: StatCardProps) {
       <p className="text-xs font-bold uppercase tracking-[0.15em]">{title}</p>
       <p className="mt-2 text-2xl font-black">{value}</p>
     </article>
-  );
-}
-                />
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() =>
-                    applyPatch(
-                      {
-                        driver_name: stepForm.driverName,
-                        truck_plate: stepForm.truckPlate
-                      },
-                      'Da cap nhat thong tin lai xe.'
-                    )
-                  }
-                  className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  Luu thong tin lai xe
-                </button>
-
-                <Input
-                  label="Phieu can xe vao"
-                  value={stepForm.weighInTicket}
-                  onChange={(value) => setStepForm((prev) => ({ ...prev, weighInTicket: value }))}
-                />
-                <Input
-                  label="Khoi luong can vao"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={stepForm.weighInWeight}
-                  onChange={(value) => setStepForm((prev) => ({ ...prev, weighInWeight: value }))}
-                />
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() =>
-                    applyPatch(
-                      {
-                        weigh_in_ticket: stepForm.weighInTicket,
-                        weigh_in_weight: Number(stepForm.weighInWeight),
-                        weigh_in_at: new Date().toISOString()
-                      },
-                      'Da ghi nhan can xe vao (buoc 6).'
-                    )
-                  }
-                  className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  Ghi can vao
-                </button>
-
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => applyPatch({ driver_received_docs_at: new Date().toISOString() }, 'Da ghi nhan buoc 10.')}
-                  className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  Nhan chung tu tu kho/bao ve
-                </button>
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => applyPatch({ left_factory_at: new Date().toISOString() }, 'Da ghi nhan buoc 11.')}
-                  className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  Xe ra khoi cong ty
-                </button>
-
-                <Input
-                  label="Phieu can xe ra"
-                  value={stepForm.weighOutTicket}
-                  onChange={(value) => setStepForm((prev) => ({ ...prev, weighOutTicket: value }))}
-                />
-                <Input
-                  label="Khoi luong can ra"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={stepForm.weighOutWeight}
-                  onChange={(value) => setStepForm((prev) => ({ ...prev, weighOutWeight: value }))}
-                />
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() =>
-                    applyPatch(
-                      {
-                        weigh_out_ticket: stepForm.weighOutTicket,
-                        weigh_out_weight: Number(stepForm.weighOutWeight),
-                        weigh_out_at: new Date().toISOString()
-                      },
-                      'Da ghi nhan can xe ra (buoc 12).'
-                    )
-                  }
-                  className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  Ghi can ra
-                </button>
-              </RoleCard>
-
-              <RoleCard title="Thu kho va bao ve" subtitle="Buoc 8-9, 15-17">
-                <Input
-                  label="So luong xuat thuc te (tan)"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={stepForm.warehouseActualQuantity}
-                  onChange={(value) => setStepForm((prev) => ({ ...prev, warehouseActualQuantity: value }))}
-                />
-                <label className="block text-xs text-slate-600">
-                  Ghi chu thu kho
-                  <textarea
-                    value={stepForm.warehouseNote}
-                    onChange={(event) => setStepForm((prev) => ({ ...prev, warehouseNote: event.target.value }))}
-                    className="mt-1 h-20 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-brand-500"
-                  />
-                </label>
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() =>
-                    applyPatch(
-                      {
-                        warehouse_actual_quantity: Number(stepForm.warehouseActualQuantity),
-                        warehouse_note: stepForm.warehouseNote,
-                        warehouse_checked_at: new Date().toISOString(),
-                        warehouse_released_at: new Date().toISOString()
-                      },
-                      'Da ghi nhan kiem tra va xuat kho (buoc 8-9).'
-                    )
-                  }
-                  className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  Xac nhan thu kho
-                </button>
-
-                <label className="block text-xs text-slate-600">
-                  Ghi chu doi chieu bao ve
-                  <textarea
-                    value={stepForm.securityNote}
-                    onChange={(event) => setStepForm((prev) => ({ ...prev, securityNote: event.target.value }))}
-                    className="mt-1 h-20 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs outline-none focus:border-brand-500"
-                  />
-                </label>
-
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() =>
-                    applyPatch(
-                      {
-                        security_checked_at: new Date().toISOString(),
-                        security_note: stepForm.securityNote,
-                        security_match: 1,
-                        security_confirmed_at: new Date().toISOString()
-                      },
-                      'Bao ve da doi chieu khop va xac nhan (buoc 15-17).'
-                    )
-                  }
-                  className="rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-700 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  Bao ve xac nhan khop
-                </button>
-
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() =>
-                    applyPatch(
-                      {
-                        security_checked_at: new Date().toISOString(),
-                        security_note: stepForm.securityNote,
-                        security_match: 0
-                      },
-                      'Bao ve danh dau thong tin khong khop (buoc 16).'
-                    )
-                  }
-                  className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  Bao ve danh dau khong khop
-                </button>
-              </RoleCard>
-            </div>
-          )}
-
-          {selectedOrder && (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-700">
-              <p className="font-semibold">Tong quan ho so #{selectedOrder.id}</p>
-              <p>Phieu nhan don: {selectedOrder.delivery_note_number || '-'}</p>
-              <p>Phieu xuat kho: {selectedOrder.export_note_number || '-'}</p>
-              <p>Lai xe/Bien so: {selectedOrder.driver_name || '-'} / {selectedOrder.truck_plate || '-'}</p>
-              <p>Can vao/can ra: {selectedOrder.weigh_in_weight ?? '-'} / {selectedOrder.weigh_out_weight ?? '-'}</p>
-              <p>Ket qua bao ve: {selectedOrder.security_match === null ? '-' : selectedOrder.security_match === 1 ? 'Khop' : 'Khong khop'}</p>
-            </div>
-          )}
-        </section>
-      </main>
-    </div>
-  );
-}
-
-type RoleCardProps = {
-  title: string;
-  subtitle: string;
-  children: ReactNode;
-};
-
-function RoleCard({ title, subtitle, children }: RoleCardProps) {
-  return (
-    <article className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-      <h3 className="text-sm font-bold text-slate-900">{title}</h3>
-      <p className="mb-2 text-xs text-slate-500">{subtitle}</p>
-      <div className="space-y-2">{children}</div>
-    </article>
-  );
-}
-
-type InputProps = {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  required?: boolean;
-  type?: string;
-  min?: string;
-  step?: string;
-  variant?: 'light' | 'dark';
-};
-
-function Input({ label, value, onChange, required = false, type = 'text', min, step, variant = 'light' }: InputProps) {
-  const isDark = variant === 'dark';
-
-  return (
-    <label className={`block ${isDark ? 'text-sm text-slate-200' : 'text-xs text-slate-600'}`}>
-      {label}
-      <input
-        required={required}
-        type={type}
-        min={min}
-        step={step}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className={`mt-1 w-full px-3 py-2 outline-none transition ${
-          isDark
-            ? 'rounded-xl border border-white/20 bg-slate-950/40 text-sm text-slate-100 focus:border-brand-100'
-            : 'rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:border-brand-500'
-        }`}
-      />
-    </label>
   );
 }
