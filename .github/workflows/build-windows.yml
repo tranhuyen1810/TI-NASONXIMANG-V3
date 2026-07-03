@@ -1,0 +1,82 @@
+name: Build Windows EXE
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish len GitHub Releases?'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      tag_name:
+        description: 'Tag release (vi du: v1.0.0). Bo trong se tu lay package version'
+        required: false
+        default: ''
+        type: string
+
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Build electron
+        run: npm run build:electron
+
+      - name: Build renderer
+        run: npm run build:renderer
+
+      - name: Determine tag
+        id: get_tag
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish == 'true'
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            echo "tag=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          else
+            VERSION=$(node -p "require('./package.json').version")
+            echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build EXE
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Publish Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_tag.outputs.tag }}
+          name: "TI-NASONXIMANG ${{ steps.get_tag.outputs.tag }}"
+          files: |
+            dist-electron-build/*.exe
+            dist-electron-build/*.blockmap
+            dist-electron-build/latest.yml
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
