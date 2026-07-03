@@ -105,7 +105,14 @@ function toOrder(record: unknown): Order | null {
   const now = new Date().toISOString();
   const plannedQuantity = typeof item.planned_quantity === 'number' ? item.planned_quantity : item.quantity;
 
-  if (typeof item.id !== 'number' || !item.customer_name || !item.phone || !item.product_name || !plannedQuantity) {
+  if (
+    typeof item.id !== 'number' ||
+    !item.customer_name ||
+    !item.phone ||
+    !item.product_name ||
+    typeof plannedQuantity !== 'number' ||
+    plannedQuantity <= 0
+  ) {
     return null;
   }
 
@@ -248,8 +255,7 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
         security_confirmed_at: '',
         summary_exported_at: '',
         status: 'NEW',
-        created_at: new Date().toISOString()
-        ,
+        created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
 

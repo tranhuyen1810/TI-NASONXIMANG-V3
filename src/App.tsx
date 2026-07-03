@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { Order, OrderPatch, useOrderStore, WorkflowStatus } from './store/orders';
 
 type FormState = {
@@ -271,11 +271,11 @@ export default function App() {
           )}
 
           <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-            <Input label="Ten khach hang" value={form.customerName} onChange={(value) => setForm((prev) => ({ ...prev, customerName: value }))} required />
-            <Input label="So dien thoai" value={form.phone} onChange={(value) => setForm((prev) => ({ ...prev, phone: value }))} required />
-            <Input label="Chung loai hang hoa" value={form.productName} onChange={(value) => setForm((prev) => ({ ...prev, productName: value }))} required />
-            <Input label="So luong du kien (tan)" type="number" min="0.1" step="0.1" value={form.quantity} onChange={(value) => setForm((prev) => ({ ...prev, quantity: value }))} required />
-            <Input label="Thoi gian giao hang" value={form.deliveryTime} onChange={(value) => setForm((prev) => ({ ...prev, deliveryTime: value }))} />
+            <Input label="Ten khach hang" value={form.customerName} onChange={(value) => setForm((prev) => ({ ...prev, customerName: value }))} required variant="dark" />
+            <Input label="So dien thoai" value={form.phone} onChange={(value) => setForm((prev) => ({ ...prev, phone: value }))} required variant="dark" />
+            <Input label="Chung loai hang hoa" value={form.productName} onChange={(value) => setForm((prev) => ({ ...prev, productName: value }))} required variant="dark" />
+            <Input label="So luong du kien (tan)" type="number" min="0.1" step="0.1" value={form.quantity} onChange={(value) => setForm((prev) => ({ ...prev, quantity: value }))} required variant="dark" />
+            <Input label="Thoi gian giao hang" value={form.deliveryTime} onChange={(value) => setForm((prev) => ({ ...prev, deliveryTime: value }))} variant="dark" />
             <label className="block text-sm text-slate-200">
               Ghi chu
               <textarea
@@ -620,7 +620,7 @@ export default function App() {
 type RoleCardProps = {
   title: string;
   subtitle: string;
-  children: React.ReactNode;
+  children: ReactNode;
 };
 
 function RoleCard({ title, subtitle, children }: RoleCardProps) {
@@ -641,11 +641,14 @@ type InputProps = {
   type?: string;
   min?: string;
   step?: string;
+  variant?: 'light' | 'dark';
 };
 
-function Input({ label, value, onChange, required = false, type = 'text', min, step }: InputProps) {
+function Input({ label, value, onChange, required = false, type = 'text', min, step, variant = 'light' }: InputProps) {
+  const isDark = variant === 'dark';
+
   return (
-    <label className="block text-xs text-slate-600">
+    <label className={`block ${isDark ? 'text-sm text-slate-200' : 'text-xs text-slate-600'}`}>
       {label}
       <input
         required={required}
@@ -654,7 +657,11 @@ function Input({ label, value, onChange, required = false, type = 'text', min, s
         step={step}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brand-500"
+        className={`mt-1 w-full px-3 py-2 outline-none transition ${
+          isDark
+            ? 'rounded-xl border border-white/20 bg-slate-950/40 text-sm text-slate-100 focus:border-brand-100'
+            : 'rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:border-brand-500'
+        }`}
       />
     </label>
   );

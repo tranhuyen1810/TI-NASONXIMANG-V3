@@ -22,25 +22,31 @@ type NewOrderPayload = {
   note?: string;
 };
 
-type OrderUpdatePayload = Partial<{
-  delivery_note_number: string;
-  export_note_number: string;
-  driver_name: string;
-  truck_plate: string;
-  weigh_in_ticket: string;
-  weigh_in_weight: number;
-  warehouse_actual_quantity: number;
-  warehouse_note: string;
-  driver_received_docs_at: string;
-  left_factory_at: string;
-  weigh_out_ticket: string;
-  weigh_out_weight: number;
-  accounting_received_weigh_out_at: string;
-  security_note: string;
-  security_match: 0 | 1;
-  summary_exported_at: string;
-  status: WorkflowStatus;
-}>;
+type OrderUpdatePayload = {
+  delivery_note_number?: string;
+  export_note_number?: string;
+  driver_name?: string;
+  truck_plate?: string;
+  weigh_in_ticket?: string;
+  weigh_in_weight?: number;
+  weigh_in_at?: string;
+  warehouse_actual_quantity?: number;
+  warehouse_note?: string;
+  warehouse_checked_at?: string;
+  warehouse_released_at?: string;
+  driver_received_docs_at?: string;
+  left_factory_at?: string;
+  weigh_out_ticket?: string;
+  weigh_out_weight?: number;
+  weigh_out_at?: string;
+  accounting_received_weigh_out_at?: string;
+  security_checked_at?: string;
+  security_note?: string;
+  security_match?: 0 | 1;
+  security_confirmed_at?: string;
+  summary_exported_at?: string;
+  status?: WorkflowStatus;
+};
 
 type OrderRecord = {
   id: number;
@@ -76,6 +82,32 @@ type OrderRecord = {
   created_at: string;
   updated_at: string;
 };
+
+const ALLOWED_UPDATE_FIELDS: ReadonlySet<keyof OrderUpdatePayload> = new Set([
+  'delivery_note_number',
+  'export_note_number',
+  'driver_name',
+  'truck_plate',
+  'weigh_in_ticket',
+  'weigh_in_weight',
+  'warehouse_actual_quantity',
+  'warehouse_note',
+  'driver_received_docs_at',
+  'left_factory_at',
+  'weigh_out_ticket',
+  'weigh_out_weight',
+  'accounting_received_weigh_out_at',
+  'security_checked_at',
+  'security_note',
+  'security_match',
+  'security_confirmed_at',
+  'summary_exported_at',
+  'status',
+  'weigh_in_at',
+  'warehouse_checked_at',
+  'warehouse_released_at',
+  'weigh_out_at'
+]);
 
 export class OrderService {
   private readonly app = express();
@@ -226,7 +258,9 @@ export class OrderService {
         return;
       }
 
-      const fields = Object.entries(payload).filter(([, value]) => value !== undefined);
+      const fields = (Object.keys(payload) as Array<keyof OrderUpdatePayload>)
+        .filter((key) => ALLOWED_UPDATE_FIELDS.has(key) && payload[key] !== undefined)
+        .map((key) => [key, payload[key] as string | number] as const);
       if (!fields.length) {
         res.status(400).json({ error: 'Khong co du lieu cap nhat.' });
         return;
@@ -256,6 +290,12 @@ export class OrderService {
   private validate(payload: NewOrderPayload): string | null {
     if (!payload || typeof payload !== 'object') {
       return 'Payload khong hop le.';
+    }
+
+    for (const key of Object.keys(payload) as Array<keyof OrderUpdatePayload>) {
+      if (!ALLOWED_UPDATE_FIELDS.has(key)) {
+        return 'Truong cap nhat khong hop le.';
+      }
     }
 
     if (!payload.customerName?.trim()) {
@@ -290,7 +330,7 @@ export class OrderService {
 
     for (const field of numericFields) {
       const value = payload[field];
-      if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+      if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value) || value < 0)) {
         return 'Gia tri khoi luong/so luong khong hop le.';
       }
     }
