@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   AlertLevel,
@@ -139,9 +139,32 @@ async function exportTemplateWorkbook(rows: Array<Record<string, string | number
     const firstName = workbook.SheetNames[0];
     const firstSheet = workbook.Sheets[firstName];
 
-    XLSX.utils.sheet_add_json(firstSheet, rows, {
-      origin: 'A8',
-      skipHeader: false
+    const header = [
+      'Ngày',
+      'Phiếu cân vào',
+      'Phiếu cân ra',
+      'Khách hàng',
+      'Biển số xe',
+      'Cân vào',
+      'Cân ra',
+      'Khối lượng hàng',
+      'Người cân'
+    ];
+
+    const body = rows.map((item) => [
+      item.ngay ?? '',
+      item.phieuCanVao ?? '',
+      item.phieuCanRa ?? '',
+      item.khachHang ?? '',
+      item.bienSoXe ?? '',
+      item.canVao ?? '',
+      item.canRa ?? '',
+      item.khoiLuongHang ?? '',
+      item.nguoiCan ?? ''
+    ]);
+
+    XLSX.utils.sheet_add_aoa(firstSheet, [header, ...body], {
+      origin: 'A8'
     });
 
     XLSX.writeFile(workbook, `bao-cao-theo-mau-${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -161,6 +184,9 @@ export default function App() {
   const [backupContent, setBackupContent] = useState('');
   const [reportFrom, setReportFrom] = useState(new Date().toISOString().slice(0, 10));
   const [reportTo, setReportTo] = useState(new Date().toISOString().slice(0, 10));
+  const [customerPage, setCustomerPage] = useState(1);
+  const [orderPage, setOrderPage] = useState(1);
+  const [orderPageSize, setOrderPageSize] = useState(10);
 
   const {
     role,
@@ -171,6 +197,8 @@ export default function App() {
     weighIns,
     warehouseExports,
     weighOuts,
+    productCatalog,
+    workflowSteps,
     inventory,
     users,
     logs,
@@ -188,6 +216,9 @@ export default function App() {
     addWeighIn,
     addWarehouseExport,
     addWeighOut,
+    markVehicleEntry,
+    addProduct,
+    toggleProduct,
     resolveAlert,
     addUser,
     toggleUser,
@@ -195,7 +226,8 @@ export default function App() {
     setMismatchThreshold,
     backupData,
     restoreData,
-    getStats
+    getStats,
+    getProcessMetrics
   } = useBusinessStore();
 
   const [customerForm, setCustomerForm] = useState({
@@ -215,14 +247,27 @@ export default function App() {
     orderNo: '',
     createdDate: new Date().toISOString().slice(0, 10),
     customerId: '',
+    productGroup: 'Xi măng',
+    productCode: '',
     product: '',
     spec: '',
+    unit: 'Tấn',
     quantity: '1',
     unitPrice: '0',
+    deliveryDate: new Date().toISOString().slice(0, 10),
+    deliveryAddress: '',
     createdBy: role.toLowerCase(),
     note: '',
     truckPlate: '',
     driverName: ''
+  });
+
+  const [productForm, setProductForm] = useState({
+    groupName: 'Xi măng',
+    code: '',
+    name: '',
+    unit: 'Tấn',
+    unitPrice: '0'
   });
 
   const [deliveryForm, setDeliveryForm] = useState({
@@ -279,6 +324,7 @@ export default function App() {
   });
 
   const stats = getStats();
+  const processMetrics = getProcessMetrics();
 
   const can = (action: PermissionAction) => rolePermissions[role].includes(action);
 
@@ -293,6 +339,12 @@ export default function App() {
     );
   }, [customers, customerFilter]);
 
+  const customerPageCount = Math.max(1, Math.ceil(visibleCustomers.length / 10));
+  const customerRows = useMemo(() => {
+    const start = (customerPage - 1) * 10;
+    return visibleCustomers.slice(start, start + 10);
+  }, [visibleCustomers, customerPage]);
+
   const visibleOrders = useMemo(() => {
     const text = orderFilter.trim().toLowerCase();
     if (!text) {
@@ -303,6 +355,64 @@ export default function App() {
       [item.orderNo, item.product, item.spec, item.truckPlate, item.driverName].some((value) => value.toLowerCase().includes(text))
     );
   }, [orders, orderFilter]);
+
+  const orderPageCount = Math.max(1, Math.ceil(visibleOrders.length / orderPageSize));
+  const orderRows = useMemo(() => {
+    const start = (orderPage - 1) * orderPageSize;
+    return visibleOrders.slice(start, start + orderPageSize);
+  }, [visibleOrders, orderPage, orderPageSize]);
+
+  const activeProducts = useMemo(() => productCatalog.filter((item) => item.active), [productCatalog]);
+
+  const groupedProducts = useMemo(() => {
+    const map = new Map<string, typeof activeProducts>();
+    for (const item of activeProducts) {
+      const list = map.get(item.groupName) ?? [];
+      list.push(item);
+      map.set(item.groupName, list);
+    }
+
+    return map;
+  }, [activeProducts]);
+
+  const timelineRows = useMemo(
+    () =>
+      [...workflowSteps]
+        .sort((a, b) => b.endAt.localeCompare(a.endAt))
+        .slice(0, 20)
+        .map((step) => ({
+          ...step,
+          orderNo: orders.find((item) => item.id === step.orderId)?.orderNo ?? '-'
+        })),
+    [workflowSteps, orders]
+  );
+
+  useEffect(() => {
+    setCustomerPage(1);
+  }, [customerFilter]);
+
+  useEffect(() => {
+    setOrderPage(1);
+  }, [orderFilter, orderPageSize]);
+
+  useEffect(() => {
+    const raw = localStorage.getItem('ti-nason-draft-order');
+    if (!raw) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as typeof orderForm;
+      setOrderForm((prev) => ({ ...prev, ...parsed }));
+    } catch {
+      // Ignore malformed draft data.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('ti-nason-draft-order', JSON.stringify(orderForm));
+  }, [orderForm]);
 
   const reportOrders = useMemo(() => {
     return orders.filter((item) => item.createdDate >= reportFrom && item.createdDate <= reportTo);
@@ -393,6 +503,12 @@ export default function App() {
     }
 
     if (orderForm.id) {
+      const editing = orders.find((item) => item.id === orderForm.id);
+      if (role === 'SALES' && editing?.status !== 'NEW') {
+        flash('Phòng Kinh doanh chỉ được sửa đơn khi chưa duyệt.');
+        return;
+      }
+
       if (!can('ORDER_EDIT')) {
         flash('Vai tro hien tai khong co quyen sua don hang.');
         return;
@@ -403,10 +519,15 @@ export default function App() {
           orderNo: orderForm.orderNo,
           createdDate: orderForm.createdDate,
           customerId: orderForm.customerId,
+          productGroup: orderForm.productGroup,
+          productCode: orderForm.productCode,
           product: orderForm.product,
           spec: orderForm.spec,
+          unit: orderForm.unit,
           quantity: Number(orderForm.quantity),
           unitPrice: Number(orderForm.unitPrice),
+          deliveryDate: orderForm.deliveryDate,
+          deliveryAddress: orderForm.deliveryAddress,
           createdBy: orderForm.createdBy,
           note: orderForm.note,
           truckPlate: orderForm.truckPlate,
@@ -425,10 +546,15 @@ export default function App() {
           orderNo: orderForm.orderNo,
           createdDate: orderForm.createdDate,
           customerId: orderForm.customerId,
+          productGroup: orderForm.productGroup,
+          productCode: orderForm.productCode,
           product: orderForm.product,
           spec: orderForm.spec,
+          unit: orderForm.unit,
           quantity: Number(orderForm.quantity),
           unitPrice: Number(orderForm.unitPrice),
+          deliveryDate: orderForm.deliveryDate,
+          deliveryAddress: orderForm.deliveryAddress,
           createdBy: orderForm.createdBy,
           note: orderForm.note,
           truckPlate: orderForm.truckPlate,
@@ -444,10 +570,15 @@ export default function App() {
       orderNo: '',
       createdDate: new Date().toISOString().slice(0, 10),
       customerId: '',
+      productGroup: 'Xi măng',
+      productCode: '',
       product: '',
       spec: '',
+      unit: 'Tấn',
       quantity: '1',
       unitPrice: '0',
+      deliveryDate: new Date().toISOString().slice(0, 10),
+      deliveryAddress: '',
       createdBy: role.toLowerCase(),
       note: '',
       truckPlate: '',
@@ -669,6 +800,16 @@ export default function App() {
 
         {tab === 'overview' && (
           <section className="space-y-4">
+            <Panel title="Hiệu suất xử lý công việc theo thời gian">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                <StatCard title="TG xử lý TB công đoạn" value={`${processMetrics.avgStepMinutes.toFixed(1)} phút`} tone="sky" />
+                <StatCard title="Bộ phận nhanh nhất" value={processMetrics.fastestDepartment} tone="emerald" />
+                <StatCard title="Bộ phận chậm nhất" value={processMetrics.slowestDepartment} tone="amber" />
+                <StatCard title="Nhân viên xử lý cao" value={processMetrics.slowestEmployee} tone="rose" />
+                <StatCard title="TG hoàn tất đơn TB" value={`${processMetrics.avgOrderCompletionMinutes.toFixed(1)} phút`} tone="sky" />
+              </div>
+            </Panel>
+
             <Panel title="Quy trinh nghiep vu tong the">
               <div className="grid gap-2 md:grid-cols-4">
                 {[
@@ -694,6 +835,46 @@ export default function App() {
                     <p className="text-xs opacity-80">{new Date(alert.createdAt).toLocaleString('vi-VN')}</p>
                   </div>
                 ))}
+              </div>
+            </Panel>
+
+            <Panel title="Bảng theo dõi thời gian công đoạn gần nhất">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[980px] text-left text-sm">
+                  <thead className="bg-slate-100 text-slate-600">
+                    <tr>
+                      <th className="px-2 py-2">Đơn hàng</th>
+                      <th className="px-2 py-2">Công đoạn</th>
+                      <th className="px-2 py-2">Người thực hiện</th>
+                      <th className="px-2 py-2">Bộ phận</th>
+                      <th className="px-2 py-2">Bắt đầu</th>
+                      <th className="px-2 py-2">Kết thúc</th>
+                      <th className="px-2 py-2">Thời gian xử lý</th>
+                      <th className="px-2 py-2">Trạng thái</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {timelineRows.map((row) => (
+                      <tr key={row.id} className="border-b border-slate-100">
+                        <td className="px-2 py-2 font-semibold">{row.orderNo}</td>
+                        <td className="px-2 py-2">{row.stage}</td>
+                        <td className="px-2 py-2">{row.actor}</td>
+                        <td className="px-2 py-2">{row.department}</td>
+                        <td className="px-2 py-2">{new Date(row.startAt).toLocaleString('vi-VN')}</td>
+                        <td className="px-2 py-2">{new Date(row.endAt).toLocaleString('vi-VN')}</td>
+                        <td className="px-2 py-2">{row.durationMinutes.toFixed(1)} phút</td>
+                        <td className="px-2 py-2">{row.status}</td>
+                      </tr>
+                    ))}
+                    {!timelineRows.length && (
+                      <tr>
+                        <td className="px-2 py-3 text-center text-slate-500" colSpan={8}>
+                          Chưa có dữ liệu thời gian xử lý.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </Panel>
           </section>
@@ -747,7 +928,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleCustomers.map((item) => {
+                    {customerRows.map((item) => {
                       const txCount = orders.filter((order) => order.customerId === item.id).length;
                       return (
                         <tr key={item.id} className="border-b border-slate-100">
@@ -813,6 +994,25 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+              <div className="mt-3 flex items-center justify-between text-xs text-slate-600">
+                <p>Trang {customerPage}/{customerPageCount} - Tổng {visibleCustomers.length} khách hàng</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCustomerPage((prev) => Math.max(1, prev - 1))}
+                    className="rounded border border-slate-300 px-2 py-1"
+                  >
+                    Trang trước
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCustomerPage((prev) => Math.min(customerPageCount, prev + 1))}
+                    className="rounded border border-slate-300 px-2 py-1"
+                  >
+                    Trang sau
+                  </button>
+                </div>
+              </div>
             </Panel>
           </section>
         )}
@@ -829,10 +1029,47 @@ export default function App() {
                   onChange={(value) => setOrderForm((s) => ({ ...s, customerId: value }))}
                   options={customers.map((c) => ({ value: c.id, label: `${c.code} - ${c.name}` }))}
                 />
-                <Input label="Hang hoa" value={orderForm.product} onChange={(value) => setOrderForm((s) => ({ ...s, product: value }))} required />
+                <Select
+                  label="Nhóm sản phẩm"
+                  value={orderForm.productGroup}
+                  onChange={(value) => {
+                    const firstProduct = groupedProducts.get(value)?.[0];
+                    setOrderForm((s) => ({
+                      ...s,
+                      productGroup: value,
+                      productCode: firstProduct?.code ?? '',
+                      product: firstProduct?.name ?? '',
+                      unit: firstProduct?.unit ?? 'Tấn',
+                      unitPrice: String(firstProduct?.unitPrice ?? 0)
+                    }));
+                  }}
+                  options={Array.from(groupedProducts.keys()).map((item) => ({ value: item, label: item }))}
+                />
+                <Select
+                  label="Sản phẩm"
+                  value={orderForm.productCode}
+                  onChange={(value) => {
+                    const selected = activeProducts.find((item) => item.code === value);
+                    setOrderForm((s) => ({
+                      ...s,
+                      productCode: value,
+                      product: selected?.name ?? '',
+                      unit: selected?.unit ?? s.unit,
+                      unitPrice: String(selected?.unitPrice ?? s.unitPrice)
+                    }));
+                  }}
+                  options={(groupedProducts.get(orderForm.productGroup) ?? []).map((item) => ({
+                    value: item.code,
+                    label: `${item.code} - ${item.name}`
+                  }))}
+                />
+                <Input label="Sản phẩm" value={orderForm.product} onChange={(value) => setOrderForm((s) => ({ ...s, product: value }))} required />
                 <Input label="Quy cach" value={orderForm.spec} onChange={(value) => setOrderForm((s) => ({ ...s, spec: value }))} required />
+                <Input label="Đơn vị tính" value={orderForm.unit} onChange={(value) => setOrderForm((s) => ({ ...s, unit: value }))} required />
                 <Input label="So luong dat" type="number" value={orderForm.quantity} onChange={(value) => setOrderForm((s) => ({ ...s, quantity: value }))} required />
                 <Input label="Don gia" type="number" value={orderForm.unitPrice} onChange={(value) => setOrderForm((s) => ({ ...s, unitPrice: value }))} required />
+                <Input label="Ngày giao hàng" type="date" value={orderForm.deliveryDate} onChange={(value) => setOrderForm((s) => ({ ...s, deliveryDate: value }))} required />
+                <Input label="Địa điểm giao hàng" value={orderForm.deliveryAddress} onChange={(value) => setOrderForm((s) => ({ ...s, deliveryAddress: value }))} required />
                 <Input label="Nguoi lap" value={orderForm.createdBy} onChange={(value) => setOrderForm((s) => ({ ...s, createdBy: value }))} required />
                 <Input label="Bien so xe" value={orderForm.truckPlate} onChange={(value) => setOrderForm((s) => ({ ...s, truckPlate: value }))} />
                 <Input label="Tai xe" value={orderForm.driverName} onChange={(value) => setOrderForm((s) => ({ ...s, driverName: value }))} />
@@ -850,6 +1087,18 @@ export default function App() {
                 placeholder="Tim so don, hang hoa, bien so, tai xe"
                 className="mb-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm md:max-w-sm"
               />
+              <div className="mb-2 flex items-center gap-2 text-xs">
+                <span>Số dòng mỗi trang</span>
+                <select
+                  value={orderPageSize}
+                  onChange={(event) => setOrderPageSize(Number(event.target.value))}
+                  className="rounded border border-slate-300 px-2 py-1"
+                >
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                </select>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[980px] text-left text-sm">
                   <thead className="bg-slate-100 text-slate-600">
@@ -864,7 +1113,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleOrders.map((item) => (
+                    {orderRows.map((item) => (
                       <tr key={item.id} className="border-b border-slate-100">
                         <td className="px-2 py-2 font-semibold">{item.orderNo}</td>
                         <td className="px-2 py-2">{item.createdDate}</td>
@@ -883,10 +1132,15 @@ export default function App() {
                                   orderNo: item.orderNo,
                                   createdDate: item.createdDate,
                                   customerId: item.customerId,
+                                  productGroup: item.productGroup ?? 'Xi măng',
+                                  productCode: item.productCode ?? '',
                                   product: item.product,
                                   spec: item.spec,
+                                  unit: item.unit ?? 'Tấn',
                                   quantity: String(item.quantity),
                                   unitPrice: String(item.unitPrice),
+                                  deliveryDate: item.deliveryDate ?? new Date().toISOString().slice(0, 10),
+                                  deliveryAddress: item.deliveryAddress ?? '',
                                   createdBy: item.createdBy,
                                   note: item.note,
                                   truckPlate: item.truckPlate,
@@ -922,12 +1176,41 @@ export default function App() {
                             >
                               Huy
                             </button>
+                            <button
+                              type="button"
+                              className="rounded bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700"
+                              onClick={() => {
+                                markVehicleEntry(item.id, role.toLowerCase());
+                                flash('Đã ghi nhận xe vào cổng.');
+                              }}
+                            >
+                              Xe vào cổng
+                            </button>
                           </div>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+              </div>
+              <div className="mt-3 flex items-center justify-between text-xs text-slate-600">
+                <p>Trang {orderPage}/{orderPageCount} - Tổng {visibleOrders.length} đơn hàng</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setOrderPage((prev) => Math.max(1, prev - 1))}
+                    className="rounded border border-slate-300 px-2 py-1"
+                  >
+                    Trang trước
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOrderPage((prev) => Math.min(orderPageCount, prev + 1))}
+                    className="rounded border border-slate-300 px-2 py-1"
+                  >
+                    Trang sau
+                  </button>
+                </div>
               </div>
             </Panel>
           </section>
@@ -1366,6 +1649,54 @@ export default function App() {
                     </div>
                   </div>
                 ))}
+              </div>
+
+              <div className="mt-4 rounded-lg border border-slate-200 p-3">
+                <p className="mb-2 text-sm font-bold text-slate-700">Danh mục sản phẩm theo nhóm</p>
+                <form
+                  className="grid gap-2 md:grid-cols-5"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    addProduct(
+                      {
+                        groupName: productForm.groupName,
+                        code: productForm.code,
+                        name: productForm.name,
+                        unit: productForm.unit,
+                        unitPrice: Number(productForm.unitPrice)
+                      },
+                      role.toLowerCase()
+                    );
+                    flash('Đã thêm sản phẩm vào danh mục.');
+                    setProductForm({ groupName: 'Xi măng', code: '', name: '', unit: 'Tấn', unitPrice: '0' });
+                  }}
+                >
+                  <Input label="Nhóm" value={productForm.groupName} onChange={(value) => setProductForm((s) => ({ ...s, groupName: value }))} required />
+                  <Input label="Mã SP" value={productForm.code} onChange={(value) => setProductForm((s) => ({ ...s, code: value }))} required />
+                  <Input label="Tên SP" value={productForm.name} onChange={(value) => setProductForm((s) => ({ ...s, name: value }))} required />
+                  <Input label="Đơn vị" value={productForm.unit} onChange={(value) => setProductForm((s) => ({ ...s, unit: value }))} required />
+                  <Input label="Đơn giá" type="number" value={productForm.unitPrice} onChange={(value) => setProductForm((s) => ({ ...s, unitPrice: value }))} required />
+                  <button type="submit" className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">
+                    Thêm mới
+                  </button>
+                </form>
+
+                <div className="mt-3 max-h-40 overflow-auto text-xs">
+                  {productCatalog.map((item) => (
+                    <div key={item.id} className="mb-1 flex items-center justify-between rounded border border-slate-200 px-2 py-1">
+                      <p>
+                        [{item.groupName}] {item.code} - {item.name} ({item.unit})
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => toggleProduct(item.id, role.toLowerCase())}
+                        className="rounded bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-700"
+                      >
+                        {item.active ? 'Ngừng sử dụng' : 'Kích hoạt'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             </Panel>
 
