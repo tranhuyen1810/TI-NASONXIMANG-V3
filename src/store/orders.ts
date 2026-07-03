@@ -28,6 +28,30 @@ type OrderStore = {
   createOrder: (payload: NewOrderInput) => Promise<void>;
 };
 
+const LOCAL_STORAGE_KEY = 'ti-nasonximang-orders';
+
+function readLocalOrders(): Order[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as Order[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed;
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalOrders(orders: Order[]) {
+  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(orders));
+}
+
 export const useOrderStore = create<OrderStore>((set, get) => ({
   apiBaseUrl: '',
   orders: [],
@@ -39,6 +63,13 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
   fetchOrders: async () => {
     const { apiBaseUrl } = get();
     if (!apiBaseUrl) {
+      return;
+    }
+
+    if (apiBaseUrl === '__LOCAL__') {
+      set({ loading: true, error: null });
+      const localOrders = readLocalOrders();
+      set({ orders: localOrders, loading: false });
       return;
     }
 
@@ -64,6 +95,26 @@ export const useOrderStore = create<OrderStore>((set, get) => ({
     const { apiBaseUrl, fetchOrders } = get();
     if (!apiBaseUrl) {
       throw new Error('He thong chua san sang.');
+    }
+
+    if (apiBaseUrl === '__LOCAL__') {
+      const existing = readLocalOrders();
+      const nextId = existing.length ? Math.max(...existing.map((item) => item.id)) + 1 : 1;
+
+      const nextOrder: Order = {
+        id: nextId,
+        customer_name: payload.customerName,
+        phone: payload.phone,
+        product_name: payload.productName,
+        quantity: payload.quantity,
+        note: payload.note,
+        created_at: new Date().toISOString()
+      };
+
+      const nextOrders = [nextOrder, ...existing];
+      writeLocalOrders(nextOrders);
+      set({ orders: nextOrders, error: null });
+      return;
     }
 
     const response = await fetch(`${apiBaseUrl}/api/orders`, {

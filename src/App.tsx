@@ -21,13 +21,28 @@ export default function App() {
   const [form, setForm] = useState<FormState>(initialForm);
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
+  const [isWebMode, setIsWebMode] = useState(false);
 
   const { apiBaseUrl, orders, loading, error, setApiBaseUrl, fetchOrders, createOrder } = useOrderStore();
 
   useEffect(() => {
-    window.desktopAPI.getApiBaseUrl().then((url) => {
-      setApiBaseUrl(url);
-    });
+    const hasDesktopApi = typeof window !== 'undefined' && typeof window.desktopAPI?.getApiBaseUrl === 'function';
+
+    if (!hasDesktopApi) {
+      setApiBaseUrl('__LOCAL__');
+      setIsWebMode(true);
+      return;
+    }
+
+    window.desktopAPI
+      ?.getApiBaseUrl()
+      .then((url) => {
+        setApiBaseUrl(url);
+      })
+      .catch(() => {
+        setApiBaseUrl('__LOCAL__');
+        setIsWebMode(true);
+      });
   }, [setApiBaseUrl]);
 
   useEffect(() => {
@@ -36,6 +51,10 @@ export default function App() {
     }
 
     fetchOrders();
+
+    if (apiBaseUrl === '__LOCAL__') {
+      return;
+    }
 
     const wsUrl = apiBaseUrl.replace('http://', 'ws://');
     const socket = new WebSocket(`${wsUrl}/ws`);
@@ -87,6 +106,11 @@ export default function App() {
           <p className="text-sm uppercase tracking-[0.2em] text-brand-100">TI-NASONXIMANG</p>
           <h1 className="mt-2 text-3xl font-bold leading-tight">Khach hang nhap don hang</h1>
           <p className="mt-2 text-sm text-slate-200">Thong tin se duoc luu vao SQLite noi bo va dong bo danh sach theo thoi gian thuc qua WebSocket.</p>
+          {isWebMode && (
+            <p className="mt-2 rounded-lg bg-amber-100/90 px-3 py-2 text-sm text-amber-900">
+              Dang chay tren web. Du lieu don hang tam thoi duoc luu trong localStorage cua trinh duyet.
+            </p>
+          )}
 
           <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
             <Input label="Ten khach hang" value={form.customerName} onChange={(value) => setForm((prev) => ({ ...prev, customerName: value }))} required />
