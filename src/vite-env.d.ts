@@ -6,6 +6,6 @@ interface DesktopAPI {
 
 declare global {
   interface Window {
-    desktopAPI: DesktopAPI;
+    desktopAPI?: DesktopAPI;
   }
 }

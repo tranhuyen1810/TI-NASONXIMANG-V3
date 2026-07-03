@@ -6,8 +6,10 @@
   "license": "MIT",
   "scripts": {
     "dev": "npm run build:electron && concurrently -n VITE,TSC,ELECTRON -c cyan,magenta,yellow \"vite\" \"tsc -p tsconfig.electron.json --watch --preserveWatchOutput\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron dist-electron/electron/main.js\"",
+    "build": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build:renderer": "vite build",
+    "vercel-build": "vite build",
     "production": "tsc -p tsconfig.electron.prod.json && vite build && electron-builder --win --x64 --publish never",
     "release:win": "tsc -p tsconfig.electron.prod.json && vite build && electron-builder --win --x64 --publish always"
   },
