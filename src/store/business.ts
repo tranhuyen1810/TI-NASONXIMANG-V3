@@ -2,6 +2,27 @@ import { create } from 'zustand';
 
 export type Role = 'ADMIN' | 'SALES' | 'ACCOUNTING' | 'WAREHOUSE' | 'WEIGHING' | 'SECURITY';
 
+export type Department =
+  | 'KHACH_HANG'
+  | 'KINH_DOANH'
+  | 'KE_TOAN'
+  | 'KHO'
+  | 'CAN_XE'
+  | 'BAO_VE'
+  | 'HE_THONG';
+
+export type WorkflowStage =
+  | 'TAO_DON_HANG'
+  | 'TIEP_NHAN_DON'
+  | 'LAP_PHIEU_XUAT'
+  | 'XE_VAO_CONG'
+  | 'CAN_XE_VAO'
+  | 'XUAT_HANG'
+  | 'CAN_XE_RA'
+  | 'HOAN_TAT_GIAO_DICH';
+
+export type StepStatus = 'DANG_XU_LY' | 'HOAN_THANH';
+
 export type CustomerStatus = 'ACTIVE' | 'LOCKED';
 
 export type OrderStatus = 'NEW' | 'APPROVED' | 'PICKING' | 'COMPLETED' | 'CANCELLED';
@@ -32,16 +53,31 @@ export type InventoryItem = {
   unitPrice: number;
 };
 
+export type ProductCatalogItem = {
+  id: string;
+  groupName: string;
+  code: string;
+  name: string;
+  unit: string;
+  unitPrice: number;
+  active: boolean;
+};
+
 export type SalesOrder = {
   id: string;
   orderNo: string;
   createdDate: string;
   customerId: string;
+  productGroup?: string;
+  productCode?: string;
   product: string;
   spec: string;
+  unit?: string;
   quantity: number;
   unitPrice: number;
   amount: number;
+  deliveryDate?: string;
+  deliveryAddress?: string;
   createdBy: string;
   note: string;
   truckPlate: string;
@@ -102,6 +138,18 @@ export type WeighOutRecord = {
   note: string;
 };
 
+export type WorkflowStep = {
+  id: string;
+  orderId: string;
+  stage: WorkflowStage;
+  department: Department;
+  actor: string;
+  startAt: string;
+  endAt: string;
+  durationMinutes: number;
+  status: StepStatus;
+};
+
 export type ReconciliationAlert = {
   id: string;
   orderId: string;
@@ -147,6 +195,14 @@ export type DashboardStats = {
   unresolvedAlerts: number;
 };
 
+export type ProcessMetrics = {
+  avgStepMinutes: number;
+  fastestDepartment: string;
+  slowestDepartment: string;
+  slowestEmployee: string;
+  avgOrderCompletionMinutes: number;
+};
+
 type BusinessStore = {
   role: Role;
   customers: Customer[];
@@ -155,6 +211,8 @@ type BusinessStore = {
   weighIns: WeighInRecord[];
   warehouseExports: WarehouseExport[];
   weighOuts: WeighOutRecord[];
+  productCatalog: ProductCatalogItem[];
+  workflowSteps: WorkflowStep[];
   inventory: InventoryItem[];
   users: UserAccount[];
   logs: SystemLog[];
@@ -173,6 +231,9 @@ type BusinessStore = {
   addWeighIn: (payload: NewWeighInInput, actor?: string) => void;
   addWarehouseExport: (payload: NewWarehouseExportInput, actor?: string) => { ok: boolean; message: string };
   addWeighOut: (payload: NewWeighOutInput, actor?: string) => void;
+  markVehicleEntry: (orderId: string, actor?: string) => void;
+  addProduct: (payload: Omit<ProductCatalogItem, 'id' | 'active'>, actor?: string) => void;
+  toggleProduct: (id: string, actor?: string) => void;
   resolveAlert: (id: string) => void;
   addUser: (user: Omit<UserAccount, 'id'>, actor?: string) => void;
   toggleUser: (id: string, actor?: string) => void;
@@ -181,9 +242,10 @@ type BusinessStore = {
   backupData: () => string;
   restoreData: (json: string, actor?: string) => { ok: boolean; message: string };
   getStats: () => DashboardStats;
+  getProcessMetrics: () => ProcessMetrics;
 };
 
-const STORAGE_KEY = 'ti-nasonximang-business-v1';
+const STORAGE_KEY = 'ti-nasonximang-business-v2';
 
 function uid(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
@@ -209,6 +271,59 @@ function appendLog(logs: SystemLog[], action: string, actor: string, objectType:
     },
     ...logs
   ].slice(0, 500);
+}
+
+function departmentLabel(dep: Department): string {
+  const labels: Record<Department, string> = {
+    KHACH_HANG: 'Khach hang',
+    KINH_DOANH: 'Phong Kinh doanh',
+    KE_TOAN: 'Phong Ke toan',
+    KHO: 'Thu kho',
+    CAN_XE: 'Nhan vien can',
+    BAO_VE: 'Bao ve',
+    HE_THONG: 'He thong'
+  };
+
+  return labels[dep];
+}
+
+function findLastStepEnd(steps: WorkflowStep[], orderId: string): string | null {
+  const records = steps.filter((item) => item.orderId === orderId).sort((a, b) => a.endAt.localeCompare(b.endAt));
+  if (!records.length) {
+    return null;
+  }
+
+  return records[records.length - 1].endAt;
+}
+
+function recordCompletedStep(
+  steps: WorkflowStep[],
+  params: {
+    orderId: string;
+    stage: WorkflowStage;
+    department: Department;
+    actor: string;
+    endAt?: string;
+  }
+): WorkflowStep[] {
+  const endAt = params.endAt ?? now();
+  const startAt = findLastStepEnd(steps, params.orderId) ?? endAt;
+  const durationMinutes = Math.max(0, (new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000);
+
+  return [
+    {
+      id: uid('step'),
+      orderId: params.orderId,
+      stage: params.stage,
+      department: params.department,
+      actor: params.actor,
+      startAt,
+      endAt,
+      durationMinutes,
+      status: 'HOAN_THANH'
+    },
+    ...steps
+  ];
 }
 
 function recalcAlerts(state: {
@@ -314,6 +429,8 @@ function saveState(partial: {
   weighIns: WeighInRecord[];
   warehouseExports: WarehouseExport[];
   weighOuts: WeighOutRecord[];
+  productCatalog: ProductCatalogItem[];
+  workflowSteps: WorkflowStep[];
   inventory: InventoryItem[];
   users: UserAccount[];
   logs: SystemLog[];
@@ -350,11 +467,16 @@ function initialData() {
         orderNo: 'DH-202607-001',
         createdDate: todayString(),
         customerId,
-        product: 'Xi mang PCB40',
+        productGroup: 'Xi măng',
+        productCode: 'XM01',
+        product: 'Xi măng 1',
         spec: 'Bao 50kg',
+        unit: 'Tấn',
         quantity: 30,
         unitPrice: 1450000,
         amount: 43500000,
+        deliveryDate: todayString(),
+        deliveryAddress: 'KCN Dong Xuyen, Vung Tau',
         createdBy: 'sales01',
         note: '',
         truckPlate: '72C-12345',
@@ -366,22 +488,33 @@ function initialData() {
     weighIns: [],
     warehouseExports: [],
     weighOuts: [],
+    productCatalog: [
+      { id: uid('prd'), groupName: 'Xi măng', code: 'XM01', name: 'Xi măng 1', unit: 'Tấn', unitPrice: 1450000, active: true },
+      { id: uid('prd'), groupName: 'Xi măng', code: 'XM02', name: 'Xi măng 2', unit: 'Tấn', unitPrice: 1420000, active: true },
+      { id: uid('prd'), groupName: 'Xi măng', code: 'XM03', name: 'Xi măng 3', unit: 'Tấn', unitPrice: 1390000, active: true },
+      { id: uid('prd'), groupName: 'Gạch', code: 'G01', name: 'Gạch 1', unit: 'Viên', unitPrice: 1300, active: true },
+      { id: uid('prd'), groupName: 'Gạch', code: 'G02', name: 'Gạch 2', unit: 'Viên', unitPrice: 1450, active: true },
+      { id: uid('prd'), groupName: 'Gạch', code: 'G03', name: 'Gạch 3', unit: 'Viên', unitPrice: 1700, active: true },
+      { id: uid('prd'), groupName: 'Vữa', code: 'V01', name: 'Vữa xây trát 1', unit: 'Bao', unitPrice: 74000, active: true },
+      { id: uid('prd'), groupName: 'Vữa', code: 'V02', name: 'Vữa xây trát 2', unit: 'Bao', unitPrice: 81000, active: true }
+    ],
+    workflowSteps: [],
     inventory: [
       {
         id: uid('inv'),
-        product: 'Xi mang PCB40',
+        product: 'Xi măng 1',
         spec: 'Bao 50kg',
         lot: 'LO-2407A',
-        warehouse: 'Kho thanh pham 1',
+        warehouse: 'Kho thành phẩm 1',
         stockQty: 240,
         unitPrice: 1450000
       },
       {
         id: uid('inv'),
-        product: 'Xi mang PCB30',
+        product: 'Xi măng 2',
         spec: 'Bao 50kg',
         lot: 'LO-2407B',
-        warehouse: 'Kho thanh pham 2',
+        warehouse: 'Kho thành phẩm 2',
         stockQty: 120,
         unitPrice: 1320000
       }
@@ -499,9 +632,15 @@ export const useBusinessStore = create<BusinessStore>((set, get) => ({
       };
 
       const nextOrders = [nextOrder, ...state.orders];
+      const nextSteps = recordCompletedStep(state.workflowSteps, {
+        orderId: nextOrder.id,
+        stage: 'TAO_DON_HANG',
+        department: 'KHACH_HANG',
+        actor
+      });
       const nextAlerts = recalcAlerts({ ...state, orders: nextOrders });
       const nextLogs = appendLog(state.logs, 'THEM_DON_HANG', actor, 'ORDER', nextOrder.id);
-      const next = { ...state, orders: nextOrders, alerts: nextAlerts, logs: nextLogs };
+      const next = { ...state, orders: nextOrders, workflowSteps: nextSteps, alerts: nextAlerts, logs: nextLogs };
       saveState(next);
       return next;
     });
@@ -535,9 +674,29 @@ export const useBusinessStore = create<BusinessStore>((set, get) => ({
   setOrderStatus: (id, status, actor = 'system') => {
     set((state) => {
       const nextOrders = state.orders.map((item) => (item.id === id ? { ...item, status } : item));
+      let nextSteps = state.workflowSteps;
+
+      if (status === 'APPROVED') {
+        nextSteps = recordCompletedStep(nextSteps, {
+          orderId: id,
+          stage: 'TIEP_NHAN_DON',
+          department: 'KINH_DOANH',
+          actor
+        });
+      }
+
+      if (status === 'COMPLETED') {
+        nextSteps = recordCompletedStep(nextSteps, {
+          orderId: id,
+          stage: 'HOAN_TAT_GIAO_DICH',
+          department: 'KE_TOAN',
+          actor
+        });
+      }
+
       const nextAlerts = recalcAlerts({ ...state, orders: nextOrders });
       const nextLogs = appendLog(state.logs, 'DOI_TRANG_THAI_DON', actor, 'ORDER', id);
-      const next = { ...state, orders: nextOrders, alerts: nextAlerts, logs: nextLogs };
+      const next = { ...state, orders: nextOrders, workflowSteps: nextSteps, alerts: nextAlerts, logs: nextLogs };
       saveState(next);
       return next;
     });
@@ -575,9 +734,23 @@ export const useBusinessStore = create<BusinessStore>((set, get) => ({
           : item
       );
 
+      const nextSteps = recordCompletedStep(current.workflowSteps, {
+        orderId: payload.orderId,
+        stage: 'LAP_PHIEU_XUAT',
+        department: 'KE_TOAN',
+        actor
+      });
+
       const nextAlerts = recalcAlerts({ ...current, orders: nextOrders, deliveryTickets: nextTickets });
       const nextLogs = appendLog(current.logs, 'LAP_PHIEU_XUAT', actor, 'DELIVERY', nextTickets[0].id);
-      const next = { ...current, deliveryTickets: nextTickets, orders: nextOrders, alerts: nextAlerts, logs: nextLogs };
+      const next = {
+        ...current,
+        deliveryTickets: nextTickets,
+        orders: nextOrders,
+        workflowSteps: nextSteps,
+        alerts: nextAlerts,
+        logs: nextLogs
+      };
       saveState(next);
       return next;
     });
@@ -606,9 +779,19 @@ export const useBusinessStore = create<BusinessStore>((set, get) => ({
   addWeighIn: (payload, actor = 'system') => {
     set((state) => {
       const nextWeighIns = [{ id: uid('wi'), ...payload }, ...state.weighIns];
+      const ticket = state.deliveryTickets.find((item) => item.id === payload.deliveryTicketId);
+      const nextSteps = ticket
+        ? recordCompletedStep(state.workflowSteps, {
+            orderId: ticket.orderId,
+            stage: 'CAN_XE_VAO',
+            department: 'CAN_XE',
+            actor,
+            endAt: payload.weighedAt
+          })
+        : state.workflowSteps;
       const nextAlerts = recalcAlerts({ ...state, weighIns: nextWeighIns });
       const nextLogs = appendLog(state.logs, 'CAN_VAO', actor, 'WEIGH_IN', nextWeighIns[0].id);
-      const next = { ...state, weighIns: nextWeighIns, alerts: nextAlerts, logs: nextLogs };
+      const next = { ...state, weighIns: nextWeighIns, workflowSteps: nextSteps, alerts: nextAlerts, logs: nextLogs };
       saveState(next);
       return next;
     });
@@ -634,11 +817,23 @@ export const useBusinessStore = create<BusinessStore>((set, get) => ({
         return item;
       });
 
+      const ticket = current.deliveryTickets.find((item) => item.id === payload.deliveryTicketId);
+      const nextSteps = ticket
+        ? recordCompletedStep(current.workflowSteps, {
+            orderId: ticket.orderId,
+            stage: 'XUAT_HANG',
+            department: 'KHO',
+            actor,
+            endAt: payload.exportedAt
+          })
+        : current.workflowSteps;
+
       const nextAlerts = recalcAlerts({ ...current, warehouseExports: nextExports });
       const nextLogs = appendLog(current.logs, 'XUAT_KHO', actor, 'WAREHOUSE_EXPORT', nextExports[0].id);
       const next = {
         ...current,
         warehouseExports: nextExports,
+        workflowSteps: nextSteps,
         inventory: nextInventory,
         alerts: nextAlerts,
         logs: nextLogs
@@ -669,9 +864,70 @@ export const useBusinessStore = create<BusinessStore>((set, get) => ({
           )
         : state.orders;
 
+      let nextSteps = state.workflowSteps;
+
+      if (orderId) {
+        nextSteps = recordCompletedStep(nextSteps, {
+          orderId,
+          stage: 'CAN_XE_RA',
+          department: 'CAN_XE',
+          actor,
+          endAt: payload.weighedAt
+        });
+
+        nextSteps = recordCompletedStep(nextSteps, {
+          orderId,
+          stage: 'HOAN_TAT_GIAO_DICH',
+          department: 'KE_TOAN',
+          actor
+        });
+      }
+
       const nextAlerts = recalcAlerts({ ...state, weighOuts: nextWeighOuts, orders: nextOrders });
       const nextLogs = appendLog(state.logs, 'CAN_RA', actor, 'WEIGH_OUT', nextWeighOuts[0].id);
-      const next = { ...state, weighOuts: nextWeighOuts, orders: nextOrders, alerts: nextAlerts, logs: nextLogs };
+      const next = {
+        ...state,
+        weighOuts: nextWeighOuts,
+        orders: nextOrders,
+        workflowSteps: nextSteps,
+        alerts: nextAlerts,
+        logs: nextLogs
+      };
+      saveState(next);
+      return next;
+    });
+  },
+
+  markVehicleEntry: (orderId, actor = 'system') => {
+    set((state) => {
+      const nextSteps = recordCompletedStep(state.workflowSteps, {
+        orderId,
+        stage: 'XE_VAO_CONG',
+        department: 'BAO_VE',
+        actor
+      });
+      const nextLogs = appendLog(state.logs, 'XE_VAO_CONG', actor, 'ORDER', orderId);
+      const next = { ...state, workflowSteps: nextSteps, logs: nextLogs };
+      saveState(next);
+      return next;
+    });
+  },
+
+  addProduct: (payload, actor = 'system') => {
+    set((state) => {
+      const nextProducts = [{ id: uid('prd'), ...payload, active: true }, ...state.productCatalog];
+      const nextLogs = appendLog(state.logs, 'THEM_SAN_PHAM', actor, 'PRODUCT', nextProducts[0].id);
+      const next = { ...state, productCatalog: nextProducts, logs: nextLogs };
+      saveState(next);
+      return next;
+    });
+  },
+
+  toggleProduct: (id, actor = 'system') => {
+    set((state) => {
+      const nextProducts = state.productCatalog.map((item) => (item.id === id ? { ...item, active: !item.active } : item));
+      const nextLogs = appendLog(state.logs, 'NGUNG_KICH_HOAT_SAN_PHAM', actor, 'PRODUCT', id);
+      const next = { ...state, productCatalog: nextProducts, logs: nextLogs };
       saveState(next);
       return next;
     });
@@ -735,6 +991,8 @@ export const useBusinessStore = create<BusinessStore>((set, get) => ({
         weighIns: state.weighIns,
         warehouseExports: state.warehouseExports,
         weighOuts: state.weighOuts,
+        productCatalog: state.productCatalog,
+        workflowSteps: state.workflowSteps,
         inventory: state.inventory,
         users: state.users,
         logs: state.logs,
@@ -755,6 +1013,8 @@ export const useBusinessStore = create<BusinessStore>((set, get) => ({
         weighIns: WeighInRecord[];
         warehouseExports: WarehouseExport[];
         weighOuts: WeighOutRecord[];
+        productCatalog: ProductCatalogItem[];
+        workflowSteps: WorkflowStep[];
         inventory: InventoryItem[];
         users: UserAccount[];
         logs: SystemLog[];
@@ -793,6 +1053,72 @@ export const useBusinessStore = create<BusinessStore>((set, get) => ({
       activeOrders,
       todayExports,
       unresolvedAlerts
+    };
+  },
+
+  getProcessMetrics: () => {
+    const state = get();
+    const completedSteps = state.workflowSteps.filter((item) => item.status === 'HOAN_THANH');
+
+    if (!completedSteps.length) {
+      return {
+        avgStepMinutes: 0,
+        fastestDepartment: '-',
+        slowestDepartment: '-',
+        slowestEmployee: '-',
+        avgOrderCompletionMinutes: 0
+      };
+    }
+
+    const avgStepMinutes = completedSteps.reduce((sum, item) => sum + item.durationMinutes, 0) / completedSteps.length;
+
+    const deptMap = new Map<Department, { total: number; count: number }>();
+    for (const step of completedSteps) {
+      const value = deptMap.get(step.department) ?? { total: 0, count: 0 };
+      value.total += step.durationMinutes;
+      value.count += 1;
+      deptMap.set(step.department, value);
+    }
+
+    const deptAverages = Array.from(deptMap.entries()).map(([department, value]) => ({
+      department,
+      avg: value.total / value.count
+    }));
+
+    deptAverages.sort((a, b) => a.avg - b.avg);
+
+    const employeeTotals = new Map<string, number>();
+    for (const step of completedSteps) {
+      employeeTotals.set(step.actor, (employeeTotals.get(step.actor) ?? 0) + step.durationMinutes);
+    }
+
+    const slowestEmployee = Array.from(employeeTotals.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '-';
+
+    const orderMap = new Map<string, WorkflowStep[]>();
+    for (const step of completedSteps) {
+      const list = orderMap.get(step.orderId) ?? [];
+      list.push(step);
+      orderMap.set(step.orderId, list);
+    }
+
+    const completionMinutes = Array.from(orderMap.values())
+      .map((list) => list.sort((a, b) => a.startAt.localeCompare(b.startAt)))
+      .map((list) => {
+        const first = list[0];
+        const last = list[list.length - 1];
+        return Math.max(0, (new Date(last.endAt).getTime() - new Date(first.startAt).getTime()) / 60000);
+      });
+
+    const avgOrderCompletionMinutes = completionMinutes.length
+      ? completionMinutes.reduce((sum, value) => sum + value, 0) / completionMinutes.length
+      : 0;
+
+    return {
+      avgStepMinutes,
+      fastestDepartment: deptAverages.length ? departmentLabel(deptAverages[0].department) : '-',
+      slowestDepartment: deptAverages.length ? departmentLabel(deptAverages[deptAverages.length - 1].department) : '-',
+      slowestEmployee,
+      avgOrderCompletionMinutes
     };
   }
 }));
